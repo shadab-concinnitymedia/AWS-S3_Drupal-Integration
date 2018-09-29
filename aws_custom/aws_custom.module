@@ -1,0 +1,159 @@
+<?php
+
+
+/**
+ * Implements hook_menu().
+ */
+function aws_custom_menu() {
+  $items = array();
+   $items['admin/config/custom-settings'] = array(
+    'title' => 'AWS custom settings',
+    'description' => 'variables & configuration form of AWS custom',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('aws_custom_settings_form'),
+    'access callback' => TRUE,
+    'weight' => 10,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function aws_custom_block_info() {
+  $blocks = array();
+  $blocks['user_service_data_download_form'] = array(
+    'info' => t('AWS User Service Data Form'),
+    'cache' => DRUPAL_CACHE_PER_USER,
+  );
+ return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function aws_custom_block_view($delta = '') {
+  $block = array();
+    switch ($delta) {
+      case 'user_service_data_download_form':
+        global $user;
+        if($user->uid > 0) { //block accessible for authenticated user only
+          $delta = "service";
+          $block['content'] = drupal_get_form('aws_custom_user_service_data_download_form');
+        }
+      break;
+    }
+  return $block;
+}
+
+/*
+ * user service data download form callback
+ */
+function aws_custom_user_service_data_download_form($form, &$form_state) {
+  global $user;
+  end($user->roles);         // move the internal pointer to the end of the array
+  $role_key = key($user->roles);
+  $service_val = variable_get('service_providers'.$role_key);
+  $options = array();
+  if(!empty($service_val)) {
+    foreach ($service_val as $key => $value) {
+      $org_name = get_term_name($value);
+      $options[$org_name] = $org_name;
+    }
+  }
+  $form['#prefix'] = '<div> Hello : '. $user->name .'</div>';
+  $form['organization'] = array(
+    '#title' => t('Select Organization'),
+    '#type' => 'select',
+    '#options' => $options,
+    '#empty_option' => t('- Select Organization -'),
+  );
+
+  $form['actions']['save'] = array(
+    '#type' => 'submit',
+    '#value' => t('Download (xls)'),
+    '#validate' > array('aws_custom_user_service_data_download_form_validate'),
+    '#submit' => array('aws_custom_user_service_data_download_submit'),
+  );
+  return $form;
+}
+
+/*
+ * user service data download form validate callback
+ */
+function aws_custom_user_service_data_download_form_validate($form, &$form_state) {
+  if(empty($form_state['values']['organization'])) {
+    form_set_error('organization', t('Please select a value of organization field.'));
+  }
+  $file_name = $form_state['values']['organization'] . '.xlsx';
+  $fid = get_file_id($file_name);
+  $uri = '';
+  if (!empty($fid)) {
+    $file = file_load($fid);
+    $uri = $file->uri;
+  }
+  if (empty($uri) || !(file_exists($uri))) {
+    form_set_error('organization', t('File is not available for this organization.'));
+  }
+}
+
+/*
+ * user service data download form submit callback
+ */
+function aws_custom_user_service_data_download_submit($form, &$form_state) {
+  $file_name = $form_state['values']['organization'] . '.xls';
+  $fid = get_file_id($file_name);
+  $file = file_load($fid);
+  if($file) {
+    file_transfer($file->uri, array('Content-disposition' => 'attachment; filename='.$file->filename));
+  }
+  else {
+    return drupal_access_denied();
+  }
+}
+
+/**
+ * Cusotm AWS configuration block.
+ */
+function aws_custom_settings_form($form, &$form_state) {
+  $roles = user_roles();
+  $vocabulary = taxonomy_vocabulary_machine_name_load('organization_name');
+  $terms = entity_load('taxonomy_term', FALSE, array('vid' => $vocabulary->vid));
+  $options = array();
+  foreach ($terms as $items) {
+    $options[$items->tid] = $items->name;
+  }
+  foreach ($roles as $key => $value) {
+    $service_val = variable_get('service_providers'.$key);
+    $form['service_providers'.$key] = array(
+      '#type' => 'select',
+      '#title' => t("Service Providers for '$value'"),
+      '#options' => $options,
+      '#default_value' => $service_val,
+      '#multiple' => true,
+    );
+  }
+
+  return system_settings_form($form);
+}
+
+/**
+ * term name by tid
+ */
+function get_term_name($tid) {
+  return db_select('taxonomy_term_data', 't')
+  ->fields('t', array('name'))
+  ->condition('tid', $tid)
+  ->execute()
+  ->fetchField();
+}
+/**
+ * fid by file_name
+ */
+function get_file_id($fname) {
+  return db_select('file_managed', 'f')
+  ->fields('f', array('fid'))
+  ->condition('filename', $fname)
+  ->execute()
+  ->fetchField();
+}

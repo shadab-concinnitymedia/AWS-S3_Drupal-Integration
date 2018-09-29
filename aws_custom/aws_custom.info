@@ -1,0 +1,4 @@
+name = AWS Custom functions
+description = This is a module to write all custom functions for AWS services.
+core = 7.x
+package = Custom
